@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MQTT Data Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        canvas {
+            max-width: 600px;
+            margin: 20px auto;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center;">Sensor Data Dashboard</h1>
+    <canvas id="temperatureChart"></canvas>
+    <canvas id="pressureChart"></canvas>
+
+    <script>
+        const temperatureCtx = document.getElementById('temperatureChart').getContext('2d');
+        const pressureCtx = document.getElementById('pressureChart').getContext('2d');
+
+        // Initialize empty datasets
+        const temperatureData = {
+            labels: [], // Timestamps
+            datasets: [{
+                label: 'Temperature (°C)',
+                data: [],
+                borderColor: 'red',
+                fill: false
+            }]
+        };
+
+        const pressureData = {
+            labels: [], // Timestamps
+            datasets: [{
+                label: 'Pressure (hPa)',
+                data: [],
+                borderColor: 'blue',
+                fill: false
+            }]
+        };
+
+        // Create charts
+        const temperatureChart = new Chart(temperatureCtx, {
+            type: 'line',
+            data: temperatureData,
+            options: {
+                responsive: true,
+                scales: {
+                    x: { title: { display: true, text: 'Timestamp' } },
+                    y: { title: { display: true, text: 'Temperature (°C)' } }
+                }
+            }
+        });
+
+        const pressureChart = new Chart(pressureCtx, {
+            type: 'line',
+            data: pressureData,
+            options: {
+                responsive: true,
+                scales: {
+                    x: { title: { display: true, text: 'Timestamp' } },
+                    y: { title: { display: true, text: 'Pressure (hPa)' } }
+                }
+            }
+        });
+
+        // Connect to WebSocket
+        const ws = new WebSocket('ws://localhost:8080');
+
+        ws.onmessage = (event) => {
+            const { topic, value } = JSON.parse(event.data);
+            const timestamp = new Date().toLocaleTimeString();
+
+            if (topic === 'sensor/temperature') {
+                temperatureData.labels.push(timestamp);
+                temperatureData.datasets[0].data.push(parseFloat(value));
+                temperatureChart.update();
+            } else if (topic === 'sensor/pressure') {
+                pressureData.labels.push(timestamp);
+                pressureData.datasets[0].data.push(parseFloat(value));
+                pressureChart.update();
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket Error:', error);
+        };
+    </script>
+
+</body>
+</html>
