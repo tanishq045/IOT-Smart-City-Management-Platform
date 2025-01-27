@@ -5,26 +5,99 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MQTT Data Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
     <style>
         canvas {
             max-width: 600px;
             margin: 20px auto;
             display: block;
         }
+        #map {
+            height: 400px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .info-window {
+            padding: 10px;
+        }
     </style>
 </head>
 <body>
     <h1 style="text-align: center;">Sensor Data Dashboard</h1>
+    <div id="map"></div>
     <canvas id="temperatureChart"></canvas>
     <canvas id="pressureChart"></canvas>
 
     <script>
+        let map;
+        let marker;
+        let infoWindow;
+        let mapInitialized = false;
+        let currentTemperature = null;
+        let currentPressure = null;
+        const MAX_DATA_POINTS = 50;  // Keeps last 50 readings on the charts
+        const DEFAULT_ZOOM = 16;
+        const SIGNIFICANT_MOVE_THRESHOLD = 0.0001; // About 11 meters at the equator
+
+        let lastCenteredLat = null;
+        let lastCenteredLng = null;
+        
+        // Load configuration from the server
+        async function loadConfig() {
+            try {
+                const response = await fetch('/config');
+                const config = await response.json();
+                
+                // Load Google Maps script dynamically
+                const script = document.createElement('script');
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap`;
+                script.async = true;
+                script.defer = true;
+                document.head.appendChild(script);
+            } catch (error) {
+                console.error('Error loading configuration:', error);
+            }
+        }
+        // Initialize the Google Map
+        function initMap() {
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: { lat: 0, lng: 0 },
+                zoom: DEFAULT_ZOOM,
+                mapTypeId: google.maps.MapTypeId.HYBRID,
+                // Add settings to reduce visual jitter
+                zoomControl: true,
+                mapTypeControl: true,
+                scaleControl: true,
+                streetViewControl: false,
+                rotateControl: false,
+                fullscreenControl: true,
+                gestureHandling: 'greedy'
+            });
+            
+            infoWindow = new google.maps.InfoWindow();
+            mapInitialized = true;
+        }
+
+        function updateInfoWindow() {
+            if (marker && infoWindow) {
+                const content = `
+                    <div class="info-window">
+                        <h3>Current Readings</h3>
+                        <p>Temperature: ${currentTemperature !== null ? currentTemperature + '°C' : 'N/A'}</p>
+                        <p>Pressure: ${currentPressure !== null ? currentPressure + ' hPa' : 'N/A'}</p>
+                    </div>
+                `;
+                infoWindow.setContent(content);
+                infoWindow.open(map, marker);
+            }
+        }
+
         const temperatureCtx = document.getElementById('temperatureChart').getContext('2d');
         const pressureCtx = document.getElementById('pressureChart').getContext('2d');
 
         // Initialize empty datasets
         const temperatureData = {
-            labels: [], // Timestamps
+            labels: [],
             datasets: [{
                 label: 'Temperature (°C)',
                 data: [],
@@ -34,7 +107,7 @@
         };
 
         const pressureData = {
-            labels: [], // Timestamps
+            labels: [],
             datasets: [{
                 label: 'Pressure (hPa)',
                 data: [],
@@ -68,28 +141,96 @@
             }
         });
 
+        function updateChart(chart, newLabel, newValue) {
+            chart.data.labels.push(newLabel);
+            chart.data.datasets[0].data.push(newValue);
+            
+            // Remove oldest data point if we exceed MAX_DATA_POINTS
+            if (chart.data.labels.length > MAX_DATA_POINTS) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            
+            chart.update();
+        }
+
         // Connect to WebSocket
         const ws = new WebSocket('ws://localhost:8080');
+
+        let currentLatitude = null;
+        let currentLongitude = null;
 
         ws.onmessage = (event) => {
             const { topic, value } = JSON.parse(event.data);
             const timestamp = new Date().toLocaleTimeString();
 
             if (topic === 'sensor/temperature') {
-                temperatureData.labels.push(timestamp);
-                temperatureData.datasets[0].data.push(parseFloat(value));
-                temperatureChart.update();
+                currentTemperature = parseFloat(value);
+                updateChart(temperatureChart, timestamp, currentTemperature);
+                updateInfoWindow();
             } else if (topic === 'sensor/pressure') {
-                pressureData.labels.push(timestamp);
-                pressureData.datasets[0].data.push(parseFloat(value));
-                pressureChart.update();
+                currentPressure = parseFloat(value);
+                updateChart(pressureChart, timestamp, currentPressure);
+                updateInfoWindow();
+            } else if (topic === 'sensor/latitude') {
+                currentLatitude = parseFloat(value);
+                updateMarker();
+            } else if (topic === 'sensor/longitude') {
+                currentLongitude = parseFloat(value);
+                updateMarker();
             }
         };
+
+        function shouldRecenterMap(newLat, newLng) {
+            if (lastCenteredLat === null || lastCenteredLng === null) return true;
+            
+            const latDiff = Math.abs(newLat - lastCenteredLat);
+            const lngDiff = Math.abs(newLng - lastCenteredLng);
+            
+            return latDiff > SIGNIFICANT_MOVE_THRESHOLD || lngDiff > SIGNIFICANT_MOVE_THRESHOLD;
+        }
+
+        function updateMarker() {
+            if (currentLatitude !== null && currentLongitude !== null && mapInitialized) {
+                const position = { lat: currentLatitude, lng: currentLongitude };
+                
+                if (!marker) {
+                    marker = new google.maps.Marker({
+                        position: position,
+                        map: map,
+                        title: "Sensor Location",
+                        // Add smooth marker movement
+                        animation: google.maps.Animation.DROP
+                    });
+                    
+                    marker.addListener('click', () => {
+                        updateInfoWindow();
+                    });
+                    
+                    // Initial centering
+                    map.setCenter(position);
+                    lastCenteredLat = currentLatitude;
+                    lastCenteredLng = currentLongitude;
+                } else {
+                    // Smooth marker position update
+                    marker.setPosition(position);
+                    
+                    // Only recenter if moved significantly
+                    if (shouldRecenterMap(currentLatitude, currentLongitude)) {
+                        map.panTo(position);
+                        lastCenteredLat = currentLatitude;
+                        lastCenteredLng = currentLongitude;
+                    }
+                }
+                
+                updateInfoWindow();
+            }
+        }
 
         ws.onerror = (error) => {
             console.error('WebSocket Error:', error);
         };
+        loadConfig();
     </script>
-
 </body>
 </html>

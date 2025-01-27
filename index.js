@@ -1,17 +1,23 @@
 const WebSocket = require('ws');
 const mqtt = require('mqtt');
-
-var options = {
-    host: 'a14097d0a00e4d709ae1273df20c672d.s1.eu.hivemq.cloud',
-    port: 8883,
-    protocol: 'mqtts',
-    username: 'tanishq',
-    password: 'Pass@123'
-};
-
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const app = express();
+
+var options = {
+    host: process.env.MQTT_HOST,
+    port: parseInt(process.env.MQTT_PORT),
+    protocol: 'mqtts',
+    username: process.env.MQTT_USERNAME,
+    password: process.env.MQTT_PASSWORD
+};
+
+app.get('/config', (req, res) => {
+    res.json({
+        googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY
+    });
+});
 
 app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from "public" directory
 
@@ -36,6 +42,8 @@ client.on('connect', function () {
     console.log('Connected to MQTT broker');
     client.subscribe('sensor/temperature');
     client.subscribe('sensor/pressure');
+    client.subscribe('sensor/latitude');
+    client.subscribe('sensor/longitude');
 });
 
 client.on('message', function (topic, message) {
