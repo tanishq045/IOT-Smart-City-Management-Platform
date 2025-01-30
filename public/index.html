@@ -3,51 +3,159 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MQTT Data Dashboard</title>
+    <title>Weather Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        canvas {
-            max-width: 600px;
-            margin: 20px auto;
-            display: block;
+        /* General Styles */
+        body {
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #6e8efb, #4a6cf7);
+            color: white;
+            height: 100vh;
+            overflow: hidden;
         }
+
+        h1 {
+            text-align: center;
+            font-size: 2.5rem;
+            margin: 20px 0;
+            font-weight: 600;
+        }
+
+        /* Dashboard Layout */
+        .dashboard-container {
+            display: flex;
+            height: calc(100vh - 100px);
+            gap: 20px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            min-width: 0;
+        }
+
+        .right-panel {
+            flex: 1;
+            min-width: 0;
+        }
+
+        /* Map Styles */
         #map {
-            height: 400px;
+            height: 100%;
             width: 100%;
-            margin-bottom: 20px;
+            border-radius: 20px;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
+
+        /* Chart Styles */
+        .charts {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            height: 100%;
+        }
+
+        .chart-container {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            min-height: 0;
+        }
+
+        canvas {
+            width: 100% !important;
+            height: auto !important;
+        }
+
+        /* Info Window Styles */
         .info-window {
-            padding: 10px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            border-radius: 15px;
+            color: white;
+            min-width: 200px;
+        }
+
+        .info-window h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.4rem;
+            color: #4a6cf7;
+        }
+
+        .info-window p {
+            margin: 8px 0;
+            font-size: 1.1rem;
+        }
+
+        /* Responsive Styles */
+        @media (max-width: 1200px) {
+            .dashboard-container {
+                flex-direction: column;
+                height: auto;
+            }
+
+            #map {
+                height: 50vh;
+            }
         }
     </style>
 </head>
 <body>
-    <h1 style="text-align: center;">Sensor Data Dashboard</h1>
-    <div id="map"></div>
-    <canvas id="temperatureChart"></canvas>
-    <canvas id="pressureChart"></canvas>
+    <h1>Weather Dashboard</h1>
+    <div class="dashboard-container">
+        <!-- Left Panel for Charts -->
+        <div class="left-panel">
+            <div class="charts">
+                <div class="chart-container">
+                    <canvas id="temperatureChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="pressureChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel for Map -->
+        <div class="right-panel">
+            <div id="map"></div>
+        </div>
+    </div>
 
     <script>
+        // Map and Marker Variables
         let map;
         let marker;
         let infoWindow;
         let mapInitialized = false;
         let currentTemperature = null;
         let currentPressure = null;
-        const MAX_DATA_POINTS = 50;  // Keeps last 50 readings on the charts
+        const MAX_DATA_POINTS = 50; // Keeps last 50 readings on the charts
         const DEFAULT_ZOOM = 16;
         const SIGNIFICANT_MOVE_THRESHOLD = 0.0001; // About 11 meters at the equator
 
         let lastCenteredLat = null;
         let lastCenteredLng = null;
-        
-        // Load configuration from the server
+
+        // Load Google Maps API
         async function loadConfig() {
             try {
                 const response = await fetch('/config');
                 const config = await response.json();
-                
+
                 // Load Google Maps script dynamically
                 const script = document.createElement('script');
                 script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap`;
@@ -58,13 +166,13 @@
                 console.error('Error loading configuration:', error);
             }
         }
-        // Initialize the Google Map
+
+        // Initialize Google Map
         function initMap() {
             map = new google.maps.Map(document.getElementById("map"), {
                 center: { lat: 0, lng: 0 },
                 zoom: DEFAULT_ZOOM,
                 mapTypeId: google.maps.MapTypeId.HYBRID,
-                // Add settings to reduce visual jitter
                 zoomControl: true,
                 mapTypeControl: true,
                 scaleControl: true,
@@ -73,11 +181,12 @@
                 fullscreenControl: true,
                 gestureHandling: 'greedy'
             });
-            
+
             infoWindow = new google.maps.InfoWindow();
             mapInitialized = true;
         }
 
+        // Update Info Window with Current Readings
         function updateInfoWindow() {
             if (marker && infoWindow) {
                 const content = `
@@ -92,39 +201,50 @@
             }
         }
 
+        // Initialize Charts
         const temperatureCtx = document.getElementById('temperatureChart').getContext('2d');
         const pressureCtx = document.getElementById('pressureChart').getContext('2d');
 
-        // Initialize empty datasets
         const temperatureData = {
             labels: [],
             datasets: [{
                 label: 'Temperature (°C)',
                 data: [],
-                borderColor: 'red',
-                fill: false
+                borderColor: 'rgba(255, 99, 132, 1)',
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                fill: true
             }]
         };
 
         const pressureData = {
-            labels: [],
-            datasets: [{
-                label: 'Pressure (hPa)',
-                data: [],
-                borderColor: 'blue',
-                fill: false
-            }]
-        };
+    labels: [],
+    datasets: [{
+        label: 'Pressure (hPa)',
+        data: [],
+        borderColor: 'rgba(255, 206, 86, 1)', // Yellow line
+        backgroundColor: 'rgba(255, 206, 86, 0.2)', // Light yellow fill
+        fill: true
+    }]
+};
 
-        // Create charts
         const temperatureChart = new Chart(temperatureCtx, {
             type: 'line',
             data: temperatureData,
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 scales: {
-                    x: { title: { display: true, text: 'Timestamp' } },
-                    y: { title: { display: true, text: 'Temperature (°C)' } }
+                    x: { 
+                        title: { display: true, text: 'Timestamp' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: { 
+                        title: { display: true, text: 'Temperature (°C)' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                },
+                plugins: {
+                    legend: { labels: { color: 'white' } }
                 }
             }
         });
@@ -134,29 +254,38 @@
             data: pressureData,
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 scales: {
-                    x: { title: { display: true, text: 'Timestamp' } },
-                    y: { title: { display: true, text: 'Pressure (hPa)' } }
+                    x: { 
+                        title: { display: true, text: 'Timestamp' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: { 
+                        title: { display: true, text: 'Pressure (hPa)' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                },
+                plugins: {
+                    legend: { labels: { color: 'white' } }
                 }
             }
         });
 
+        // Update Charts with New Data
         function updateChart(chart, newLabel, newValue) {
             chart.data.labels.push(newLabel);
             chart.data.datasets[0].data.push(newValue);
-            
-            // Remove oldest data point if we exceed MAX_DATA_POINTS
+
             if (chart.data.labels.length > MAX_DATA_POINTS) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();
             }
-            
+
             chart.update();
         }
 
-        // Connect to WebSocket
+        // WebSocket Connection
         const ws = new WebSocket('ws://localhost:8080');
-
         let currentLatitude = null;
         let currentLongitude = null;
 
@@ -181,40 +310,30 @@
             }
         };
 
-        function shouldRecenterMap(newLat, newLng) {
-            if (lastCenteredLat === null || lastCenteredLng === null) return true;
-            
-            const latDiff = Math.abs(newLat - lastCenteredLat);
-            const lngDiff = Math.abs(newLng - lastCenteredLng);
-            
-            return latDiff > SIGNIFICANT_MOVE_THRESHOLD || lngDiff > SIGNIFICANT_MOVE_THRESHOLD;
-        }
-
+        // Update Marker Position
         function updateMarker() {
             if (currentLatitude !== null && currentLongitude !== null && mapInitialized) {
                 const position = { lat: currentLatitude, lng: currentLongitude };
-                
+
                 if (!marker) {
                     marker = new google.maps.Marker({
                         position: position,
                         map: map,
                         title: "Sensor Location",
-                        // Add smooth marker movement
                         animation: google.maps.Animation.DROP
                     });
-                    
+
                     marker.addListener('click', () => {
                         updateInfoWindow();
                     });
-                    
+
                     // Initial centering
                     map.setCenter(position);
                     lastCenteredLat = currentLatitude;
                     lastCenteredLng = currentLongitude;
                 } else {
-                    // Smooth marker position update
                     marker.setPosition(position);
-                    
+
                     // Only recenter if moved significantly
                     if (shouldRecenterMap(currentLatitude, currentLongitude)) {
                         map.panTo(position);
@@ -222,14 +341,26 @@
                         lastCenteredLng = currentLongitude;
                     }
                 }
-                
+
                 updateInfoWindow();
             }
+        }
+
+        // Check if Map Should Recenter
+        function shouldRecenterMap(newLat, newLng) {
+            if (lastCenteredLat === null || lastCenteredLng === null) return true;
+
+            const latDiff = Math.abs(newLat - lastCenteredLat);
+            const lngDiff = Math.abs(newLng - lastCenteredLng);
+
+            return latDiff > SIGNIFICANT_MOVE_THRESHOLD || lngDiff > SIGNIFICANT_MOVE_THRESHOLD;
         }
 
         ws.onerror = (error) => {
             console.error('WebSocket Error:', error);
         };
+
+        // Load Configuration and Initialize
         loadConfig();
     </script>
 </body>
