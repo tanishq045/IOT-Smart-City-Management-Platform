@@ -44,6 +44,7 @@ client.on('connect', function () {
     client.subscribe('sensor/pressure');
     client.subscribe('sensor/latitude');
     client.subscribe('sensor/longitude');
+    client.subscribe('sensor/button'); // Subscribe to the button topic
 });
 
 client.on('message', function (topic, message) {
